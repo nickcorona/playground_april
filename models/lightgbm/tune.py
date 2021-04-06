@@ -3,11 +3,11 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from optuna.integration._lightgbm_tuner.optimize import LightGBMTunerCV
 import pandas as pd
 import phik
 import seaborn as sns
 from helpers import encode_dates, loguniform, similarity_encode
+from optuna.integration._lightgbm_tuner.optimize import LightGBMTunerCV
 from pandas_profiling import ProfileReport
 from sklearn.model_selection import train_test_split
 from statsmodels.nonparametric.smoothers_lowess import lowess
@@ -21,7 +21,6 @@ df = pd.read_csv(
     delimiter=",",
     low_memory=False,
 )
-
 
 PROFILE = False
 if PROFILE:
@@ -54,7 +53,9 @@ def preprocess(df):
     df["ticket_prefix"] = df["Ticket"].str.extract(r"([A-Za-z.\d\/]+) ")
     df["family_size"] = df["SibSp"] + df["Parch"]
     df["age*class"] = df["Age"] * df["Pclass"]
-    df = df.drop(["Name", "Ticket"], axis=1, errors="ignore")
+    df["deck"] = df["Cabin"].str.extract(r"([A-Z])")
+    df["cabin_number"] = df["Cabin"].str.extract(r"(\d+)")
+    df = df.drop(["Name", "Ticket", "Cabin"], axis=1, errors="ignore")
     return df
 
 
