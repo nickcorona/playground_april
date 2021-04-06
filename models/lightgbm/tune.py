@@ -15,15 +15,20 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 import lightgbm as lgb
 
 df = pd.read_csv(
-    r"data\train.csv", parse_dates=[], index_col=[], delimiter=",", low_memory=False,
+    r"data\train.csv",
+    parse_dates=[],
+    index_col=["PassengerId"],
+    delimiter=",",
+    low_memory=False,
 )
+
 
 PROFILE = False
 if PROFILE:
     profile = ProfileReport(df)
     profile.to_file("pandas_profiling_report.html")
 
-TARGET = "target"
+TARGET = "Survived"
 print(f"Missing targets: {df[TARGET].isnull().sum()}")
 print(f"% missing: {df[TARGET].isnull().sum() / len(df):.0%}")
 
@@ -35,42 +40,40 @@ DROP_FEATURES = []
 y = df[TARGET].replace(np.nan, 0)
 X = df.drop([TARGET, *DROP_FEATURES], axis=1,)
 
-obj_cols = X.select_dtypes("object").columns
-nunique = X[obj_cols].nunique()
-prop_unique = (X[obj_cols].nunique() / len(df)).sort_values(
-    ascending=False
-)  # in order of most unique to least
-unique = pd.concat([prop_unique, nunique], axis=1)
-unique.columns = [
-    "proportion",
-    "nunique",
-]
-print(unique)
 
-ENCODE = False
-if ENCODE:
-    X = similarity_encode(
-        X, encode_columns=[], n_prototypes=4, preran=False, drop_original=True,
+def preprocess(df):
+    df = df.copy()
+    df["ticket_number"] = (
+        df["Ticket"]
+        .str.split(" ")
+        .dropna()
+        .apply(lambda x: x[-1])
+        .replace({"": np.nan})
+        .astype(float)
     )
+    df["ticket_prefix"] = df["Ticket"].str.extract(r"([A-Za-z.\d\/]+) ")
+    df["family_size"] = df["SibSp"] + df["Parch"]
+    df["age*class"] = df["Age"] * df["Pclass"]
+    df = df.drop(["Name", "Ticket"], axis=1, errors="ignore")
+    return df
 
-LENGTH_ENCODE = False
-if LENGTH_ENCODE:
-    len_encode = ["URL"]
-    for col in len_encode:
-        X[f"{col}_len"] = X[col].apply(len)
-        X = X.drop(col, axis=1)
+
+X = preprocess(X)
 
 CATEGORIZE = True
 if CATEGORIZE:
+    obj_cols = X.select_dtypes("object").columns
     X[obj_cols] = X[obj_cols].astype("category")
 
 DATE_ENCODE = False
 if DATE_ENCODE:
     X = encode_dates(X, "date")
 
-sns.displot(y)
-plt.title("Distribution")
-plt.show()
+PLOT_TARGET = False
+if PLOT_TARGET:
+    sns.displot(y)
+    plt.title("Distribution")
+    plt.show()
 
 SEED = 0
 SAMPLE_SIZE = 10000
@@ -86,8 +89,8 @@ ds = lgb.Dataset(Xs, ys)
 dv = lgb.Dataset(Xv, yv, free_raw_data=False)
 
 OBJECTIVE = "binary"
-METRIC = "auc"
-MAXIMIZE = True
+METRIC = "binary_error"
+MAXIMIZE = False
 EARLY_STOPPING_ROUNDS = 200
 MAX_ROUNDS = 20000
 REPORT_ROUNDS = 100
@@ -98,7 +101,6 @@ params = {
     "verbose": -1,
     "n_jobs": 6,
     "num_classes": 1,
-    # "tweedie_variance_power": 1.3,
 }
 
 model = lgb.train(
