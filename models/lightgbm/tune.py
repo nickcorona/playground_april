@@ -52,9 +52,9 @@ def preprocess(df):
     )
     df["ticket_prefix"] = df["Ticket"].str.extract(r"([A-Za-z.\d\/]+) ")
     df["family_size"] = df["SibSp"] + df["Parch"]
-    df["age*class"] = df["Age"] * df["Pclass"]
+    df["age*pclass"] = df["Age"] * df["Pclass"]
     df["deck"] = df["Cabin"].str.extract(r"([A-Z])")
-    df["cabin_number"] = df["Cabin"].str.extract(r"(\d+)")
+    df["cabin_number"] = df["Cabin"].str.extract(r"(\d+)").astype(float)
     df = df.drop(["Name", "Ticket", "Cabin"], axis=1, errors="ignore")
     return df
 
@@ -117,7 +117,7 @@ model = lgb.train(
 lgb.plot_importance(model, grid=False, max_num_features=20, importance_type="gain")
 plt.show()
 
-TUNE_ETA = False
+TUNE_ETA = True
 best_etas = {"learning_rate": [], "score": []}
 if TUNE_ETA:
     for _ in range(30):
@@ -162,7 +162,7 @@ if TUNE_ETA:
     params["learning_rate"] = best_eta
 else:
     # best learning rate once run
-    params["learning_rate"] = 0.0018070851946266953
+    params["learning_rate"] = 0.1206840078080975
 
 model = lgb.train(
     params,
@@ -174,7 +174,7 @@ model = lgb.train(
     verbose_eval=REPORT_ROUNDS,
 )
 
-DROP_CORRELATED = False
+DROP_CORRELATED = True
 if DROP_CORRELATED:
     threshold = 0.75
     corr = Xt.phik_matrix()
@@ -253,7 +253,7 @@ if correlation_elimination:
     )
 
 # decide which unimportant features to drop to improve the model
-DROP_UNIMPORTANT = False
+DROP_UNIMPORTANT = True
 if DROP_UNIMPORTANT:
     sorted_features = [
         feature
@@ -376,24 +376,26 @@ else:
     dt = lgb.Dataset(Xt, yt, silent=True)
     ds = lgb.Dataset(Xs, ys, silent=True)
     dv = lgb.Dataset(Xv, yv, silent=True)
-    # best auc: 0.894095
+    # best error: 0.21356
     best_params = {
         "objective": "binary",
-        "metric": "auc",
+        "metric": "binary_error",
         "verbose": -1,
         "n_jobs": 6,
         "num_classes": 1,
-        "learning_rate": 0.0018070851946266953,
+        "learning_rate": 0.1206840078080975,
         "feature_pre_filter": False,
-        "lambda_l1": 4.3569849005576895,
-        "lambda_l2": 8.13979872828947e-06,
-        "num_leaves": 256,
-        "feature_fraction": 0.42,
-        "bagging_fraction": 0.7384161919037386,
-        "bagging_freq": 5,
-        "min_child_samples": 5,
-        "num_boost_round": 7523,
+        "lambda_l1": 0.0,
+        "lambda_l2": 0.0,
+        "num_leaves": 7,
+        "feature_fraction": 0.8,
+        "bagging_fraction": 1.0,
+        "bagging_freq": 0,
+        "min_child_samples": 20,
+        "num_boost_rounds": 304,
     }
+
+
 model = lgb.train(
     best_params,
     dt,
@@ -410,6 +412,7 @@ print(f"{METRIC}: {score:.4f}")
 lgb.plot_importance(
     model, grid=False, max_num_features=20, importance_type="gain", figsize=(10, 5)
 )
+plt.show()
 figure_path = Path("figures")
 figure_path.mkdir(exist_ok=True)
 plt.savefig(figure_path / "feature_importance.png")
@@ -417,10 +420,11 @@ plt.savefig(figure_path / "feature_importance.png")
 # test score
 TEST = True
 if TEST:
-    df_test = pd.read_csv("data/test.csv")
-    df_test[obj_cols] = df_test[obj_cols].astype("category")
+    df_test = pd.read_csv("data/test.csv", index_col=["PassengerId"])
     X_test = df_test.drop(DROP_FEATURES, axis=1)
-    y_pred = model.predict(X_test)
-    submission = pd.Series(y_pred, index=df_test["id"])
-    submission.name = "target"
+    X_test = preprocess(X_test)
+    X_test[obj_cols] = X_test[obj_cols].astype("category")
+    y_pred = np.where(model.predict(X_test) > 0.5, 1, 0)
+    submission = pd.Series(y_pred, index=df_test.index)
+    submission.name = "Survived"
     submission.to_csv("submission/lightgbm.csv")
